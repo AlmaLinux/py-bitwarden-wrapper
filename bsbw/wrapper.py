@@ -5,6 +5,7 @@ import os
 import re
 import time
 import typing
+from copy import copy
 
 import jmespath
 from cryptography.fernet import Fernet
@@ -122,8 +123,11 @@ class BWCLIWrapper:
 
     def __init__(
         self,
-        username: str,
-        password_file: str,
+        username: str = None,
+        password_file: str = None,
+        password: str = os.environ.get('BW_PASSWORD'),
+        client_id: str = os.environ.get('BW_CLIENTID'),
+        client_secret: str = os.environ.get('BW_CLIENTSECRET'),
         collection_id: typing.Optional[str] = None,
         verbose: bool = False,
     ):
@@ -139,8 +143,18 @@ class BWCLIWrapper:
             raise e
 
         self.__username = username
-        self.__password_file = base64.urlsafe_b64encode(os.path.expanduser(
-            os.path.expandvars(password_file)).encode('utf-8'))
+        self.__client_id = client_id
+        self.__client_secret = client_secret
+        self.__password = password
+        if password_file is not None:
+            password_file_path = os.path.expanduser(
+                os.path.expandvars(password_file)
+            )
+            self.__password_file = base64.urlsafe_b64encode(
+                password_file_path.encode('utf-8')
+            )
+        else:
+            self.__password_file = None
         self.__collection_id = collection_id
 
     def __dir__(self) -> typing.Iterable[str]:
@@ -152,9 +166,20 @@ class BWCLIWrapper:
             self.sync.__name__,
         ]
 
+    def _update_bw_environment(self, envs):
+        if self._bw.env is None:
+            self._bw.env = copy(local.env)
+        for key, value in envs.items():
+            self._bw.env[key] = value
+
     def bw(
-            self, *args, ignore_errors: bool = False,
+        self,
+        *args,
+        ignore_errors: bool = False,
+        envs: typing.Optional[typing.Dict[str, str]] = None,
     ) -> typing.Tuple[int, str, str]:
+        if envs is not None:
+            self._update_bw_environment(envs)
         exit_code, stdout, stderr = self._bw.run(args=args, retcode=None)
         if exit_code != 0 and not ignore_errors:
             message = (
@@ -166,8 +191,8 @@ class BWCLIWrapper:
         self.__log.debug('Exit code: %d\nStdout:\n%s\nStderr:\n%s')
         return exit_code, stdout.strip(), stderr.strip()
 
-    def bw_simple(self, *args) -> str:
-        _, out, _ = self.bw(*args)
+    def bw_simple(self, *args, envs=None) -> str:
+        _, out, _ = self.bw(*args, envs=envs)
         return out.strip()
 
     def bw_simple_with_key(self, *args, session_key: str = None) -> str:
@@ -218,9 +243,16 @@ class BWCLIWrapper:
         # Check preset variable
         if os.environ.get(ENV_VAR_NAME):
             return os.environ[ENV_VAR_NAME]
-        session_key = self.bw_simple(
-            'unlock', '--passwordfile', self.__get_pw_file(), '--raw'
-        )
+        if self.__password:
+            session_key = self.bw_simple(
+                'unlock', '--passwordenv', 'BW_PASSWORD', '--raw', envs={
+                    'BW_PASSWORD': self.__password,
+                }
+            )
+        else:
+            session_key = self.bw_simple(
+                'unlock', '--passwordfile', self.__get_pw_file(), '--raw'
+            )
         os.environ[ENV_VAR_NAME] = session_key
         return session_key
 
@@ -237,18 +269,37 @@ class BWCLIWrapper:
                 return
 
             self.logout()
-            self.bw_simple(
-                'login', self.__username, '--passwordfile',
-                self.__get_pw_file(), '--raw'
-            )
+            if self.__client_id and self.__client_secret:
+                self.bw_simple(
+                    'login', '--apikey', envs={
+                        'BW_CLIENTID': self.__client_id,
+                        'BW_CLIENTSECRET': self.__client_secret,
+                    }
+                )
+            elif self.__password:
+                self.bw_simple(
+                    'login', self.__username, '--passwordenv',
+                    'BW_PASSWORD', '--raw', envs={
+                        'BW_PASSWORD': self.__password,
+                    }
+                )
+            else:
+                self.bw_simple(
+                    'login', self.__username, '--passwordfile',
+                    self.__get_pw_file(), '--raw'
+                )
         except BWCLIError as e:
             exception = e
-            error_message = (f'Cannot login to the Bitwarden due to the problem '
-                             f'with "bw" utility, original error message: %s')
+            error_message = (
+                'Cannot login to the Bitwarden due to the problem '
+                'with "bw" utility, original error message: %s'
+            )
         except Exception as e:
             exception = e
-            error_message = (f'Unknown error during the login attempt. '
-                             f'Original error message: %s')
+            error_message = (
+                'Unknown error during the login attempt.'
+                ' Original error message: %s'
+            )
         finally:
             if error_message and exception:
                 self.__log.error(error_message, str(exception))
