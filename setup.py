@@ -16,7 +16,7 @@ setup(
     install_requires=[
         'cryptography',
         'jmespath>=0.10.0',
-        'plumbum==1.8.2',
+        'plumbum>=1.8.2',
         'pydantic',
     ],
     python_requires=">=3.6",
