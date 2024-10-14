@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="bitwarden-wrapper",
-    version="0.1.14",
+    version="0.1.15",
     author="Vasily Kleschov",
     author_email="kleshev12@gmail.com",
     description="The python wrapper around Bitwarden CLI.",
