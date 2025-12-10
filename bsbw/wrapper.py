@@ -49,7 +49,7 @@ class CredentialsContainer:
         self.__creds_dict = {}
         if isinstance(credentials, dict):
             temp_storage = {
-                name: BaseCredentials(**creds).dict()
+                name: BaseCredentials(**creds).model_dump()
                 for name, creds in credentials.items()
             }
         else:
@@ -57,7 +57,7 @@ class CredentialsContainer:
                 NamedCredentials(**item) for item in credentials
             ]
             temp_storage = {
-                item.name: item.dict() for item in validation
+                item.name: item.model_dump() for item in validation
             }
             del validation
         for name, cred in temp_storage.items():
